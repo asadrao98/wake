@@ -6,6 +6,9 @@ export default function Wake() {
   const canvasRef = useRef(null);
   const startBtnRef = useRef(null);
   const restartBtnRef = useRef(null);
+  const stickRef = useRef(null);
+  const thumbRef = useRef(null);
+  const pulseBtnRef = useRef(null);
 
   useEffect(() => {
     const cv = canvasRef.current;
@@ -110,6 +113,41 @@ export default function Wake() {
     startBtn.addEventListener('click', onStart);
     restartBtn.addEventListener('click', onStart);
 
+    const touch = { active: false, pid: null, ix: 0, iy: 0, mag: 0, cx: 0, cy: 0 };
+    const stickEl = stickRef.current;
+    const thumbEl = thumbRef.current;
+    const pulseBtnEl = pulseBtnRef.current;
+    const STICK_R = 56;
+    function stickStart(e) {
+      if (touch.active) return;
+      const rect = stickEl.getBoundingClientRect();
+      touch.cx = rect.left + rect.width / 2;
+      touch.cy = rect.top + rect.height / 2;
+      touch.active = true; touch.pid = e.pointerId;
+      stickEl.setPointerCapture(e.pointerId);
+      stickMove(e);
+    }
+    function stickMove(e) {
+      if (!touch.active || e.pointerId !== touch.pid) return;
+      let dx = e.clientX - touch.cx, dy = e.clientY - touch.cy;
+      const d = Math.hypot(dx, dy);
+      if (d > STICK_R) { dx = dx / d * STICK_R; dy = dy / d * STICK_R; }
+      thumbEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      touch.ix = dx / STICK_R; touch.iy = dy / STICK_R;
+      touch.mag = Math.min(1, d / STICK_R);
+    }
+    function stickEnd(e) {
+      if (e.pointerId !== touch.pid) return;
+      touch.active = false; touch.pid = null; touch.ix = 0; touch.iy = 0; touch.mag = 0;
+      thumbEl.style.transform = '';
+    }
+    stickEl.addEventListener('pointerdown', stickStart);
+    stickEl.addEventListener('pointermove', stickMove);
+    stickEl.addEventListener('pointerup', stickEnd);
+    stickEl.addEventListener('pointercancel', stickEnd);
+    const onPulseBtn = (e) => { e.preventDefault(); actx(); doPulse(); };
+    pulseBtnEl.addEventListener('pointerdown', onPulseBtn);
+
     function start(fresh) {
       if (fresh) { depth = 1; pings = 3; }
       buildLevel();
@@ -180,14 +218,21 @@ export default function Wake() {
 
     let last = performance.now();
     function update(dt, now) {
-      let ix = 0, iy = 0;
-      if (keys['KeyW'] || keys['ArrowUp']) iy -= 1;
-      if (keys['KeyS'] || keys['ArrowDown']) iy += 1;
-      if (keys['KeyA'] || keys['ArrowLeft']) ix -= 1;
-      if (keys['KeyD'] || keys['ArrowRight']) ix += 1;
-      const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
-      if (ix || iy) { const l = Math.hypot(ix, iy); ix /= l; iy /= l; }
-      const ps = sprint ? player.sprint : player.speed;
+      let ix = 0, iy = 0, ps;
+      if (touch.active && touch.mag > 0.15) {
+        const m = Math.max(touch.mag, 0.0001);
+        ix = touch.ix / m; iy = touch.iy / m;
+        const t = Math.min(1, (touch.mag - 0.15) / 0.85);
+        ps = player.speed + t * (player.sprint - player.speed);
+      } else {
+        if (keys['KeyW'] || keys['ArrowUp']) iy -= 1;
+        if (keys['KeyS'] || keys['ArrowDown']) iy += 1;
+        if (keys['KeyA'] || keys['ArrowLeft']) ix -= 1;
+        if (keys['KeyD'] || keys['ArrowRight']) ix += 1;
+        const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+        if (ix || iy) { const l = Math.hypot(ix, iy); ix /= l; iy /= l; }
+        ps = sprint ? player.sprint : player.speed;
+      }
       const tvx = ix * ps, tvy = iy * ps;
       player.vx += (tvx - player.vx) * Math.min(1, 14 * dt);
       player.vy += (tvy - player.vy) * Math.min(1, 14 * dt);
@@ -418,6 +463,11 @@ export default function Wake() {
       window.removeEventListener('keyup', onKeyUp);
       startBtn.removeEventListener('click', onStart);
       restartBtn.removeEventListener('click', onStart);
+      stickEl.removeEventListener('pointerdown', stickStart);
+      stickEl.removeEventListener('pointermove', stickMove);
+      stickEl.removeEventListener('pointerup', stickEnd);
+      stickEl.removeEventListener('pointercancel', stickEnd);
+      pulseBtnEl.removeEventListener('pointerdown', onPulseBtn);
     };
   }, []);
 
@@ -437,13 +487,27 @@ export default function Wake() {
         <div className="thesis">To see, you must move. To move is to be seen.</div>
         <div className="panel">
           The dark only opens as far as you travel. Stand still and you go blind — but so does what hunts you.<br />
-          Find the <b>three lights</b>, then reach the way down.<br /><br />
-          <span className="key">W</span><span className="key">A</span><span className="key">S</span><span className="key">D</span> move &nbsp;·&nbsp;
-          <span className="key">SHIFT</span> sprint &nbsp;·&nbsp;
-          <span className="key">SPACE</span> pulse
+          Find the <b>three lights</b>, then reach the way down.
+          <div className="ctrls ctrls-kb">
+            <span className="key">W</span><span className="key">A</span><span className="key">S</span><span className="key">D</span> move &nbsp;·&nbsp;
+            <span className="key">SHIFT</span> sprint &nbsp;·&nbsp;
+            <span className="key">SPACE</span> pulse
+          </div>
+          <div className="ctrls ctrls-touch">
+            <b>Joystick</b> to move — push further to run &nbsp;·&nbsp; tap <b>PULSE</b>
+          </div>
         </div>
         <button className="btn" id="startBtn" ref={startBtnRef}>Descend</button>
         <div className="hint">A pulse reveals everything for a moment — but everything hears it</div>
+      </div>
+
+      <div id="touch">
+        <div id="stick" ref={stickRef}>
+          <div id="thumb" ref={thumbRef} />
+        </div>
+        <button id="pulseBtn" ref={pulseBtnRef} aria-label="Pulse">
+          <span>PULSE</span>
+        </button>
       </div>
 
       <div className="overlay hidden" id="end">
