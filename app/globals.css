@@ -24,6 +24,9 @@ body {
 #depth { top: 22px; left: 26px; }
 #shards { top: 22px; left: 50%; transform: translateX(-50%); text-align: center; }
 #shards .v { color: var(--gold); }
+#lives { top: 22px; right: 26px; text-align: right; }
+#lives .v { color: var(--hunter); font-size: 22px; letter-spacing: 6px; }
+#lives .v .x { color: rgba(207, 232, 228, .15); }
 #pings { bottom: 24px; left: 26px; }
 #pings .v { color: var(--bio-hot); }
 #breath { position: fixed; bottom: 24px; right: 26px; text-align: right; }
@@ -134,6 +137,39 @@ body {
   .ctrls-touch { display: block; }
 }
 
+#rotate { display: none; }
+@keyframes rotateHint {
+  0%, 40%   { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(-90deg); }
+}
+@media (pointer: coarse) and (orientation: portrait) {
+  #rotate {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--void);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+    color: var(--bio);
+  }
+  .rotate-icon {
+    color: var(--bio);
+    filter: drop-shadow(0 0 12px rgba(52,239,208,.45));
+    animation: rotateHint 2.4s ease-in-out infinite;
+    transform-origin: 50% 50%;
+  }
+  .rotate-text {
+    margin-top: 28px;
+    font-size: 16px; font-weight: 800; letter-spacing: .22em;
+    color: var(--paper);
+  }
+  .rotate-sub {
+    margin-top: 10px;
+    font-size: 11px; letter-spacing: .24em;
+    color: rgba(207, 232, 228, .5);
+    text-transform: uppercase;
+  }
+}
+
 @media (max-width: 520px) {
   .title { letter-spacing: .16em; }
   .thesis { margin-top: 14px; line-height: 1.7; padding: 0 8px; }
@@ -144,7 +180,9 @@ body {
   #shards { top: 14px; }
   .stat .v { font-size: 20px; }
   .stat .lab { font-size: 9px; }
-  #pings { bottom: auto; top: 14px; right: 14px; left: auto; }
+  #lives { top: 14px; right: 14px; }
+  #lives .v { font-size: 16px; letter-spacing: 4px; }
+  #pings { bottom: auto; top: 50px; left: 14px; right: auto; }
   #breath { display: none; }
   #stick { left: 18px; bottom: 28px; width: 124px; height: 124px; }
   #pulseBtn { right: 18px; bottom: 40px; width: 84px; height: 84px; }

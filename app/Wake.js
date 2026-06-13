@@ -32,6 +32,7 @@ export default function Wake() {
     let AC = null;
     function actx() {
       if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+      if (AC && AC.state === 'suspended') { AC.resume().catch(() => {}); }
       return AC;
     }
     function blip(freq, dur, type, vol) {
@@ -46,6 +47,7 @@ export default function Wake() {
         o.stop(t + (dur || 0.2));
       } catch (e) {}
     }
+
 
     const CELL = 52;
     let COLS = 21, ROWS = 21, grid = [], worldW = 0, worldH = 0;
@@ -89,15 +91,30 @@ export default function Wake() {
     const player = { x: 0, y: 0, vx: 0, vy: 0, r: 11, speed: 200, sprint: 330 };
     let hunters = [], shards = [], exit = null;
     let trails = [];
+    let dust = [];
+    let dustTimer = 0;
 
     let running = false, depth = 0, shardsNeeded = 3, pings = 3, exitOpen = false;
+    let lives = 3, pendingReset = true;
     const keys = {};
     const elDepth = document.querySelector('#depth .v');
     const elShards = document.querySelector('#shards .v');
     const elPings = document.querySelector('#pings .v');
+    const elLives = document.getElementById('livesV');
     const elSight = document.getElementById('sightfill');
+    function updateLivesHUD() {
+      if (!elLives) return;
+      let html = '';
+      for (let i = 0; i < 3; i++) {
+        html += i < lives ? '<span>\u25CF</span>' : '<span class="x">\u25CF</span>';
+      }
+      elLives.innerHTML = html;
+    }
 
     let pulse = null;
+    const shake = { mag: 0, t: 0, dur: 0 };
+    function kick(mag, dur) { shake.mag = mag; shake.t = dur; shake.dur = dur; }
+    let heartPhase = 0, heartTension = 0;
 
     function onKeyDown(e) {
       keys[e.code] = true;
@@ -109,7 +126,14 @@ export default function Wake() {
 
     const startBtn = startBtnRef.current;
     const restartBtn = restartBtnRef.current;
-    const onStart = () => { actx(); start(true); };
+    const onStart = () => {
+      actx(); start(true);
+      try {
+        if (window.screen && screen.orientation && screen.orientation.lock) {
+          screen.orientation.lock('landscape').catch(() => {});
+        }
+      } catch (e) {}
+    };
     startBtn.addEventListener('click', onStart);
     restartBtn.addEventListener('click', onStart);
 
@@ -149,11 +173,17 @@ export default function Wake() {
     pulseBtnEl.addEventListener('pointerdown', onPulseBtn);
 
     function start(fresh) {
-      if (fresh) { depth = 1; pings = 3; }
+      if (pendingReset) {
+        depth = 1; lives = 3; pings = 3;
+        pendingReset = false;
+      } else if (fresh) {
+        if (pings < 3) pings = 3;
+      }
       buildLevel();
       document.getElementById('start').classList.add('hidden');
       document.getElementById('end').classList.add('hidden');
       running = true; last = performance.now();
+      updateLivesHUD();
     }
 
     function buildLevel() {
@@ -182,6 +212,7 @@ export default function Wake() {
         });
       }
       trails = [];
+      dust = [];
       elDepth.textContent = depth;
       elPings.textContent = pings;
       updateShardHUD();
@@ -260,6 +291,18 @@ export default function Wake() {
         if (pulse.life <= 0) pulse = null;
       }
 
+      if (shake.t > 0) { shake.t -= dt; if (shake.t < 0) shake.t = 0; }
+
+      let nearestH = Infinity;
+      for (const h of hunters) {
+        const d = Math.hypot(h.x - player.x, h.y - player.y);
+        if (d < nearestH) nearestH = d;
+      }
+      const tTarget = Math.max(0, Math.min(1, (480 - nearestH) / 400));
+      heartTension += (tTarget - heartTension) * Math.min(1, 3 * dt);
+      const bpm = 55 + heartTension * 95;
+      heartPhase += dt * (bpm / 60);
+
       for (const h of hunters) {
         const dToP = Math.hypot(player.x - h.x, player.y - h.y);
         const sense = 360, prox = 110;
@@ -301,6 +344,38 @@ export default function Wake() {
         if (t.age > t.max) trails.splice(i, 1);
       }
 
+      dustTimer -= dt;
+      while (dustTimer <= 0 && dust.length < 70) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 40 + Math.random() * 280;
+        const dx = player.x + Math.cos(ang) * dist;
+        const dy = player.y + Math.sin(ang) * dist;
+        if (!isWallWorld(dx, dy)) {
+          dust.push({
+            x: dx, y: dy,
+            vx: (Math.random() - 0.5) * 8,
+            vy: -3 - Math.random() * 7,
+            life: 0,
+            maxLife: 2.4 + Math.random() * 3,
+            size: 0.7 + Math.random() * 1.6,
+            phase: Math.random() * Math.PI * 2,
+            hue: Math.random() < 0.92 ? 'bio' : 'warm',
+          });
+        }
+        dustTimer += 0.06 + Math.random() * 0.05;
+      }
+      for (let i = dust.length - 1; i >= 0; i--) {
+        const d = dust[i];
+        d.life += dt;
+        if (d.life >= d.maxLife) { dust.splice(i, 1); continue; }
+        d.vx += Math.sin(d.life * 1.4 + d.phase) * dt * 5;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        if (isWallWorld(d.x, d.y) || Math.hypot(d.x - player.x, d.y - player.y) > 520) {
+          dust.splice(i, 1);
+        }
+      }
+
       const vr = visionRadius(pspd);
       elSight.style.width = Math.round((vr - MINV) / (MAXV - MINV) * 100) + '%';
     }
@@ -318,11 +393,35 @@ export default function Wake() {
 
     function die() {
       running = false;
+      kick(22, 0.25);
       blip(140, 0.6, 'sawtooth', 0.08); blip(90, 0.7, 'sawtooth', 0.05);
+
+      let title = 'TAKEN', stats, btnText = 'Continue';
+      if (depth === 1) {
+        lives = 3;
+        pendingReset = true;
+        stats = 'The dark closed at <b>Depth ' + depth + '</b>';
+        btnText = 'Again';
+      } else {
+        lives -= 1;
+        if (lives <= 0) {
+          title = 'GAME OVER';
+          pendingReset = true;
+          stats = 'The dark consumed you at <b>Depth ' + depth + '</b>';
+          btnText = 'Restart';
+        } else {
+          pendingReset = false;
+          const word = lives === 1 ? 'life' : 'lives';
+          stats = '<b>' + lives + '</b> ' + word + ' left  —  Depth ' + depth;
+        }
+      }
+
+      updateLivesHUD();
+
       const et = document.getElementById('endTitle');
-      et.textContent = 'TAKEN'; et.className = '';
-      document.getElementById('endStats').innerHTML =
-        'The dark closed at <b>Depth ' + depth + '</b>';
+      et.textContent = title; et.className = title === 'GAME OVER' ? 'over' : '';
+      document.getElementById('endStats').innerHTML = stats;
+      restartBtn.textContent = btnText;
       document.getElementById('end').classList.remove('hidden');
     }
 
@@ -336,6 +435,12 @@ export default function Wake() {
       camY = Math.max(0, Math.min(worldH - H, camY));
       if (worldW < W) camX = (worldW - W) / 2;
       if (worldH < H) camY = (worldH - H) / 2;
+      if (shake.t > 0 && shake.dur > 0) {
+        const k = shake.t / shake.dur;
+        const m = shake.mag * k * k;
+        camX += (Math.random() - 0.5) * 2 * m;
+        camY += (Math.random() - 0.5) * 2 * m;
+      }
 
       ctx.save();
       ctx.translate(-camX, -camY);
@@ -365,6 +470,24 @@ export default function Wake() {
         ctx.arc(t.x, t.y, t.sz * (0.5 + a * 0.8), 0, 7);
         ctx.fill();
       }
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const d of dust) {
+        const t = d.life / d.maxLife;
+        let a;
+        if (t < 0.2) a = t / 0.2;
+        else if (t > 0.7) a = (1 - t) / 0.3;
+        else a = 1;
+        a *= 0.45;
+        ctx.fillStyle = d.hue === 'warm'
+          ? 'rgba(255,213,107,' + a.toFixed(3) + ')'
+          : 'rgba(155,255,238,' + a.toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.size, 0, 7);
+        ctx.fill();
+      }
+      ctx.restore();
 
       for (const s of shards) {
         if (s.got) continue;
@@ -436,14 +559,41 @@ export default function Wake() {
         dctx.beginPath(); dctx.arc(sx, sy, radius, 0, 7); dctx.fill();
       }
 
-      hole(player.x, player.y, visionRadius(pspd), 0.5);
-      for (const h of hunters) { const r = (h.speed / 215) * 200; if (r > 8) hole(h.x, h.y, r, 0.4); }
+      const vR = visionRadius(pspd);
+      hole(player.x, player.y, vR, 0.5);
+      for (const h of hunters) {
+        const r = (h.speed / 215) * 200; if (r > 8) hole(h.x, h.y, r, 0.4);
+        const dToP = Math.hypot(h.x - player.x, h.y - player.y);
+        if (dToP > vR && dToP < vR * 1.65) {
+          const fade = 1 - (dToP - vR) / (vR * 0.65);
+          const rate = 0.0045 + (Math.abs(h.x) % 11) * 0.0004;
+          const flick = 0.35 + 0.65 * Math.sin(now * rate + h.y * 0.11);
+          const gr = 26 * fade * Math.max(0, flick);
+          if (gr > 3) hole(h.x, h.y, gr, 0.15);
+        }
+      }
       for (const s of shards) { if (!s.got) hole(s.x, s.y, 60 + 18 * Math.sin(s.t * 3), 0.2); }
       if (exit) hole(exit.x, exit.y, exitOpen ? 170 : 55, 0.3);
       if (pulse) hole(pulse.x, pulse.y, pulse.r, 0.7);
 
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
       ctx.drawImage(dark, 0, 0, W, H);
+
+      if (heartTension > 0.04) {
+        const phase = heartPhase - Math.floor(heartPhase);
+        const lub = Math.exp(-phase * 14);
+        const dub = Math.exp(-Math.abs(phase - 0.22) * 18);
+        const beat = Math.min(1, lub + dub * 0.7);
+        const intensity = heartTension * (0.35 + 0.65 * beat);
+        const minD = Math.min(W, H), maxD = Math.max(W, H);
+        const inner = minD * (0.38 - heartTension * 0.12);
+        const outer = maxD * 0.72;
+        const g = ctx.createRadialGradient(W / 2, H / 2, inner, W / 2, H / 2, outer);
+        g.addColorStop(0, 'rgba(255,45,107,0)');
+        g.addColorStop(1, 'rgba(255,45,107,' + (intensity * 0.55).toFixed(3) + ')');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+      }
     }
 
     let rafId;
@@ -475,9 +625,21 @@ export default function Wake() {
     <>
       <canvas id="c" ref={canvasRef} />
 
+      <div id="rotate" aria-hidden="true">
+        <svg className="rotate-icon" viewBox="0 0 80 80" width="96" height="96" aria-hidden="true">
+          <rect x="22" y="6" width="36" height="68" rx="6" fill="none" stroke="currentColor" strokeWidth="2.5" />
+          <circle cx="40" cy="68" r="1.8" fill="currentColor" />
+          <path d="M 8 44 Q 8 14 40 12" fill="none" stroke="currentColor" strokeWidth="2.5" />
+          <polyline points="34,4 40,12 32,18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <div className="rotate-text">ROTATE YOUR DEVICE</div>
+        <div className="rotate-sub">Landscape only</div>
+      </div>
+
       <div id="hud">
         <div id="depth" className="stat"><span className="lab">Depth</span><span className="v">1</span></div>
         <div id="shards" className="stat"><span className="lab">Lights</span><span className="v">0 / 3</span></div>
+        <div id="lives" className="stat"><span className="lab">Lives</span><span className="v" id="livesV">{'\u25CF\u25CF\u25CF'}</span></div>
         <div id="pings" className="stat"><span className="lab">Pulse</span><span className="v">3</span></div>
         <div id="breath"><span className="lab">Sight</span><div id="sightbar"><div id="sightfill" /></div></div>
       </div>
