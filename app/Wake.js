@@ -38,6 +38,16 @@ export default function Wake() {
       if (AC && AC.state === 'suspended') { AC.resume().catch(() => {}); }
       return AC;
     }
+    function unlockAudio() {
+      const a = actx(); if (!a) return;
+      try {
+        const buf = a.createBuffer(1, 1, 22050);
+        const src = a.createBufferSource();
+        src.buffer = buf;
+        src.connect(a.destination);
+        src.start(0);
+      } catch (e) {}
+    }
     function blip(freq, dur, type, vol) {
       const a = actx(); if (!a) return;
       try {
@@ -130,7 +140,7 @@ export default function Wake() {
     const startBtn = startBtnRef.current;
     const restartBtn = restartBtnRef.current;
     const onStart = () => {
-      actx(); start(true);
+      unlockAudio(); start(true);
       if (!isTouch) return;
       try {
         const el = document.documentElement;
