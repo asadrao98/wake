@@ -16,6 +16,9 @@ export default function Wake() {
     const dark = document.createElement('canvas');
     const dctx = dark.getContext('2d');
 
+    const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const ZOOM = isTouch ? 0.78 : 1.0;
+
     let W = 0, H = 0, DPR = 1;
     function resize() {
       DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -128,10 +131,24 @@ export default function Wake() {
     const restartBtn = restartBtnRef.current;
     const onStart = () => {
       actx(); start(true);
+      if (!isTouch) return;
       try {
-        if (window.screen && screen.orientation && screen.orientation.lock) {
-          screen.orientation.lock('landscape').catch(() => {});
-        }
+        const el = document.documentElement;
+        const req = el.requestFullscreen ? el.requestFullscreen.bind(el)
+                  : el.webkitRequestFullscreen ? el.webkitRequestFullscreen.bind(el)
+                  : null;
+        const lock = () => {
+          try {
+            if (window.screen && screen.orientation && screen.orientation.lock) {
+              screen.orientation.lock('landscape').catch(() => {});
+            }
+          } catch (e) {}
+        };
+        if (req) {
+          const p = req();
+          if (p && p.then) p.then(lock).catch(lock);
+          else lock();
+        } else lock();
       } catch (e) {}
     };
     startBtn.addEventListener('click', onStart);
@@ -386,7 +403,7 @@ export default function Wake() {
       if (trails.length > 260) trails.shift();
     }
 
-    const MINV = 46, MAXV = 300;
+    const MINV = 46 / ZOOM, MAXV = 300 / ZOOM;
     function visionRadius(spd) {
       return MINV + Math.min(1, spd / player.sprint) * (MAXV - MINV);
     }
@@ -430,23 +447,25 @@ export default function Wake() {
       ctx.fillStyle = '#02040a'; ctx.fillRect(0, 0, W, H);
       if (!grid.length) return;
 
-      let camX = player.x - W / 2, camY = player.y - H / 2;
-      camX = Math.max(0, Math.min(worldW - W, camX));
-      camY = Math.max(0, Math.min(worldH - H, camY));
-      if (worldW < W) camX = (worldW - W) / 2;
-      if (worldH < H) camY = (worldH - H) / 2;
+      const visW = W / ZOOM, visH = H / ZOOM;
+      let camX = player.x - visW / 2, camY = player.y - visH / 2;
+      camX = Math.max(0, Math.min(worldW - visW, camX));
+      camY = Math.max(0, Math.min(worldH - visH, camY));
+      if (worldW < visW) camX = (worldW - visW) / 2;
+      if (worldH < visH) camY = (worldH - visH) / 2;
       if (shake.t > 0 && shake.dur > 0) {
         const k = shake.t / shake.dur;
-        const m = shake.mag * k * k;
+        const m = shake.mag * k * k / ZOOM;
         camX += (Math.random() - 0.5) * 2 * m;
         camY += (Math.random() - 0.5) * 2 * m;
       }
 
       ctx.save();
+      ctx.scale(ZOOM, ZOOM);
       ctx.translate(-camX, -camY);
 
-      const c0 = Math.max(0, (camX / CELL) | 0), c1 = Math.min(COLS, ((camX + W) / CELL | 0) + 1);
-      const r0 = Math.max(0, (camY / CELL) | 0), r1 = Math.min(ROWS, ((camY + H) / CELL | 0) + 1);
+      const c0 = Math.max(0, (camX / CELL) | 0), c1 = Math.min(COLS, ((camX + visW) / CELL | 0) + 1);
+      const r0 = Math.max(0, (camY / CELL) | 0), r1 = Math.min(ROWS, ((camY + visH) / CELL | 0) + 1);
       for (let r = r0; r < r1; r++) {
         for (let c = c0; c < c1; c++) {
           if (grid[r][c] === 1) {
@@ -541,16 +560,16 @@ export default function Wake() {
 
       ctx.restore();
 
-      dctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-      dctx.clearRect(0, 0, W, H);
+      dctx.setTransform(DPR * ZOOM, 0, 0, DPR * ZOOM, 0, 0);
+      dctx.clearRect(0, 0, visW, visH);
       dctx.globalCompositeOperation = 'source-over';
       dctx.fillStyle = 'rgba(2,4,10,0.985)';
-      dctx.fillRect(0, 0, W, H);
+      dctx.fillRect(0, 0, visW, visH);
       dctx.globalCompositeOperation = 'destination-out';
 
       function hole(wx, wy, radius, soft) {
         const sx = wx - camX, sy = wy - camY;
-        if (sx < -radius || sy < -radius || sx > W + radius || sy > H + radius) return;
+        if (sx < -radius || sy < -radius || sx > visW + radius || sy > visH + radius) return;
         const g = dctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
         g.addColorStop(0, 'rgba(0,0,0,1)');
         g.addColorStop(soft != null ? soft : 0.55, 'rgba(0,0,0,0.9)');
